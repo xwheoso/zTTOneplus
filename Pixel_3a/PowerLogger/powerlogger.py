@@ -1,54 +1,68 @@
+import subprocess
 import time
-import Monsoon.HVPM as HVPM
-import Monsoon.sampleEngine as sampleEngine
-import Monsoon.Operations as op
+
+battery_path = "/sys/class/power_supply/battery"
 
 class PowerLogger:
-	def __init__(self):
-		self.power=0
-		self.voltage=0
-		self.current=0
-		self.power_data = []
-		self.voltage_data = []
-		self.current_data = []
-		self.Mon = HVPM.Monsoon()
-		self.Mon.setup_usb()
-		self.engine = sampleEngine.SampleEngine(self.Mon)
-		self.engine.disableCSVOutput()
-		self.engine.ConsoleOutput(False)
+    def __init__(self, ip):
+        self.ip = ip
+        self.power = 0
+        self.voltage = 0
+        self.current = 0
+        
+        self.battery_path = battery_path
+        self._connect()
 
-	def _getTime(self):
-		return time.clock_gettime(time.CLOCK_REALTIME)
+    def _connect(self):
+        print(f"Connecting to {self.ip}...")
+        subprocess.run(f"adb connect {self.ip}", shell=True)
 
-	def getPower(self):
-		self.engine.enableChannel(sampleEngine.channels.MainCurrent)
-		self.engine.enableChannel(sampleEngine.channels.MainVoltage)
-		self.engine.startSampling(1)
-		sample = self.engine.getSamples()
-		current = sample[sampleEngine.channels.MainCurrent][0]
-		voltage = sample[sampleEngine.channels.MainVoltage][0]
-		self.Mon.stopSampling()
-		self.engine.disableChannel(sampleEngine.channels.MainCurrent)
-		self.engine.disableChannel(sampleEngine.channels.MainVoltage)
-		self.power = current * voltage
-		self.power_data.append(self.power)
-		#print(self.power)
-		return current * voltage
+    def _read_file(self, filename):
+        cmd = f"cat {self.battery_path}/{filename}"
+        try:
+            # timeout 设置短一点，防止卡顿
+            output = subprocess.check_output(
+                ['adb', '-s', self.ip, 'shell', 'su -c', f'"{cmd}"'], 
+                timeout=1
+            )
+            val = float(output.decode('utf-8').strip())
+            return val
+        except:
+            return None # 返回 None 表示读取失败
 
-	def getVoltage(self):
-		self.engine.startSampling(1)
-		sample = self.engine.getSamples()
-		voltage = sample[sampleEngine.channels.MainVoltage][0]
-		self.Mon.stopSampling()
-		self.voltage = voltage
-		self.voltage_data.append(self.voltage)
-		return voltage
+    def getVoltage(self):
+        # 电压单位通常是 uV (10^-6)
+        val = self._read_file("voltage_now")
+        if val is not None:
+            self.voltage = val / 1_000_000 
+        return self.voltage
 
-	def getCurrent(self):
-		self.engine.startSampling(1)
-		sample = self.engine.getSamples()
-		current = sample[sampleEngine.channels.MainCurrent][0]
-		self.Mon.stopSampling()
-		self.current = current
-		self.current_data.append(self.current)
-		return current
+    def getCurrent(self):
+        val = self._read_file("current_now")
+        if val is not None:
+            # 这里的单位是 mA，所以除以 1000
+            self.current = abs(val) / 1000.0
+        return self.current
+
+    def getPower(self):
+        v = self.getVoltage()
+        i = self.getCurrent()
+        
+        # 简单的数据清洗：如果电压或电流为0，说明读取失败，保持上一次的值不更新
+        if v > 0 and i >= 0:
+            self.power = v * i
+        
+        return self.power
+
+if __name__ == "__main__":
+    IP = "192.168.3.38"
+    logger = PowerLogger(IP)
+    
+    print("功耗监控已启动 (单位: mA -> W)")
+    try:
+        while True:
+            p = logger.getPower()
+            print(f"Power: {p:.4f} W | Current: {logger.current:.4f} A")
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass

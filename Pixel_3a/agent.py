@@ -120,6 +120,7 @@ class DQNAgent:
 		model.summary()
 		model.compile(loss='mse', optimizer=Adam(lr=self.learning_rate))
 		return model
+	
 	def update_target_model(self):
 		self.target_model.set_weights(self.model.get_weights())
 	
@@ -314,14 +315,16 @@ if __name__=="__main__":
 			# get action
 			state=next_state
 
-
+			# 过热保护机制
 			if c_t>=target_temp:
 				c_c=int(3*random.randint(0,int(c_c/3))+2)
 				g_c=int(random.randint(1,g_c))
 
 				action=3*int(c_c/3)+int(g_c)-1
+			# 温度有富余情况
 			elif target_temp-c_t>=3:
 				if fps<target_fps:
+					# 30%概率探索
 					if np.random.rand() <= 0.3:
 						print('previous clock : {} {}'.format(c_c,g_c))
 						c_c=int(3*random.randint(int(c_c/3),2)+2)
@@ -329,6 +332,7 @@ if __name__=="__main__":
 
 						print('explore higher clock@@@@@  {} {}'.format(c_c,g_c))
 						action=3*int(c_c/3)+int(g_c)-1
+					# 70%概率利用
 					else:
 						action=agent.get_action(state)
 						c_c=agent.clk_action_list[action][0]
@@ -337,9 +341,6 @@ if __name__=="__main__":
 					action=agent.get_action(state)
 					c_c=agent.clk_action_list[action][0]
 					g_c=agent.clk_action_list[action][1]
-
-
-
 			else:
 				action=agent.get_action(state)
 				c_c=agent.clk_action_list[action][0]
